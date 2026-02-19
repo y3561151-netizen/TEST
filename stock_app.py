@@ -7,10 +7,13 @@ from datetime import datetime, timedelta
 # 頁面設定
 st.set_page_config(page_title="台股智慧分析師", layout="wide")
 
-# 從 Secrets 讀取 Token
-FINMIND_TOKEN = st.secrets["FINMIND_TOKEN"]
-dl = DataLoader()
-dl.login(token=FINMIND_TOKEN)
+# 嘗試從 Secrets 讀取 Token 並登入
+try:
+    FINMIND_TOKEN = st.secrets["FINMIND_TOKEN"]
+    dl = DataLoader()
+    dl.login(token=FINMIND_TOKEN)
+except Exception as e:
+    st.error("FinMind 登入失敗，請檢查 Secrets 設定。")
 
 # --- 側邊欄：功能選單 ---
 st.sidebar.title("🚀 選股神器 2.0")
@@ -22,7 +25,7 @@ def get_stock_data(stock_id):
     ticker = yf.Ticker(f"{stock_id}.TW")
     df_yf = ticker.history(period="1mo")
     
-    # 取得 FinMind 數據 (用於技術指標)
+    # 取得 FinMind 技術指標數據
     end_date = datetime.now().strftime('%Y-%m-%d')
     start_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
     df_fm = dl.taiwan_stock_daily(stock_id=stock_id, start_date=start_date, end_date=end_date)
@@ -51,16 +54,16 @@ if analyze_btn or stock_id:
         t_col1, t_col2 = st.columns(2)
         with t_col1:
             status = "多頭排列 💹" if current_price > ma5 > ma20 else "空頭排列 📉" if current_price < ma5 < ma20 else "震盪整理 ⚖️"
-            st.info(f"**短中線趨勢：** {status}")
+            st.info(f"**趨勢：** {status}")
         with t_col2:
             bias = ((current_price - ma20) / ma20) * 100
-            st.warning(f"**月線乖離率：** {bias:.2f}%")
+            st.warning(f"**月線乖離：** {bias:.2f}%")
 
         st.divider()
 
         # --- 3. 量能監控 ---
         st.subheader("📊 量能監控")
-        current_vol = df_yf['Volume'].iloc[-1] / 1000  # 換算成張數
+        current_vol = df_yf['Volume'].iloc[-1] / 1000 
         avg_vol = df_yf['Volume'].tail(5).mean() / 1000
         vol_ratio = current_vol / avg_vol if avg_vol > 0 else 1
         
@@ -73,14 +76,13 @@ if analyze_btn or stock_id:
 
         st.divider()
 
-        # --- 4. 最新相關新聞 (新增區塊) ---
+        # --- 4. 最新焦點新聞 ---
         st.subheader("📰 相關焦點新聞")
         news = ticker.news
         if news:
-            for item in news[:5]: # 只顯示前 5 則新聞
+            for item in news[:5]:
                 with st.expander(item['title']):
                     st.write(f"**來源：** {item['publisher']}")
-                    st.write(f"**發布時間：** {datetime.fromtimestamp(item['providerPublishTime']).strftime('%Y-%m-%d %H:%M')}")
                     st.link_button("閱讀完整內容", item['link'])
         else:
             st.write("暫無相關新聞。")
@@ -98,7 +100,6 @@ if analyze_btn or stock_id:
         st.write(f"目前診斷總分：**{score} 分**")
 
     except Exception as e:
-        st.error(f"資料讀取失敗，請確認代碼是否正確。錯誤訊息: {e}")
+        st.error(f"分析失敗，請檢查代碼或資料。詳細訊息: {e}")
 
-# 版權宣告
-st.caption("數據僅供參考，投資有風險，入市需謹慎。")
+st.caption("數據僅供參考，投資有風險。")

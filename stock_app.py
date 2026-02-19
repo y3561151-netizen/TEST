@@ -5,74 +5,83 @@ from FinMind.data import DataLoader
 from datetime import datetime, timedelta
 
 # 頁面設定
-st.set_page_config(page_title="台股智慧分析師", layout="wide")
+st.set_page_config(page_title="台股智慧分析師 Pro", layout="wide")
 
-# 嘗試從 Secrets 讀取 Token 並登入
-try:
-    FINMIND_TOKEN = st.secrets["FINMIND_TOKEN"]
-    dl = DataLoader()
-    dl.login(token=FINMIND_TOKEN)
-except Exception as e:
-    st.error("FinMind 登入失敗，請檢查 Secrets 設定。")
+# 登入 FinMind (使用 Secrets)
+@st.cache_resource
+def init_finmind():
+    try:
+        dl = DataLoader()
+        dl.login(token=st.secrets["FINMIND_TOKEN"])
+        return dl
+    except:
+        return None
+
+dl = init_finmind()
 
 # --- 側邊欄：功能選單 ---
 st.sidebar.title("🚀 選股神器 2.0")
 stock_id = st.sidebar.text_input("輸入股票代碼", value="2330")
-analyze_btn = st.sidebar.button("開始診斷")
+analyze_btn = st.sidebar.button("執行全方位診斷")
 
-def get_stock_data(stock_id):
-    # 取得 yfinance 數據
+def get_data(stock_id):
+    # yfinance 數據
     ticker = yf.Ticker(f"{stock_id}.TW")
-    df_yf = ticker.history(period="1mo")
+    df_yf = ticker.history(period="3mo")
     
-    # 取得 FinMind 技術指標數據
+    # FinMind 數據
     end_date = datetime.now().strftime('%Y-%m-%d')
-    start_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
-    df_fm = dl.taiwan_stock_daily(stock_id=stock_id, start_date=start_date, end_date=end_date)
+    start_date = (datetime.now() - timedelta(days=100)).strftime('%Y-%m-%d')
     
-    return df_yf, df_fm, ticker
+    # 技術面 & 籌碼面
+    df_daily = dl.taiwan_stock_daily(stock_id=stock_id, start_date=start_date, end_date=end_date)
+    df_inst = dl.taiwan_stock_institutional_investors(stock_id=stock_id, start_date=start_date, end_date=end_date)
+    
+    return df_yf, df_daily, df_inst, ticker
 
 if analyze_btn or stock_id:
     try:
-        df_yf, df_fm, ticker = get_stock_data(stock_id)
+        df_yf, df_daily, df_inst, ticker = get_data(stock_id)
         info = ticker.info
-        current_price = df_yf['Close'].iloc[-1]
-        prev_price = df_yf['Close'].iloc[-2]
-        change = current_price - prev_price
-        change_pct = (change / prev_price) * 100
+        curr = df_yf['Close'].iloc[-1]
+        prev = df_yf['Close'].iloc[-2]
+        diff = curr - prev
+        pct = (diff / prev) * 100
 
         # --- 1. 核心報價 ---
         st.title(f"📈 {info.get('longName', stock_id)} 診斷報告")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("最新價格", f"{current_price:.2f}", f"{change:+.2f} ({change_pct:+.2f}%)")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("最新價格", f"{curr:.2f}", f"{diff:+.2f} ({pct:+.2f}%)")
         
-        # --- 2. 技術診斷 ---
+        # --- 2. 技術面深度診斷 ---
         st.subheader("🔍 技術面分析")
-        ma5 = df_yf['Close'].rolling(5).mean().iloc[-1]
-        ma20 = df_yf['Close'].rolling(20).mean().iloc[-1]
+        ma5, ma10, ma20 = df_yf['Close'].rolling(5).mean().iloc[-1], df_yf['Close'].rolling(10).mean().iloc[-1], df_yf['Close'].rolling(20).mean().iloc[-1]
         
-        t_col1, t_col2 = st.columns(2)
-        with t_col1:
-            status = "多頭排列 💹" if current_price > ma5 > ma20 else "空頭排列 📉" if current_price < ma5 < ma20 else "震盪整理 ⚖️"
-            st.info(f"**趨勢：** {status}")
-        with t_col2:
-            bias = ((current_price - ma20) / ma20) * 100
-            st.warning(f"**月線乖離：** {bias:.2f}%")
+        t1, t2, t3 = st.columns(3)
+        with t1:
+            trend = "強勢多頭 🟢" if curr > ma5 > ma10 else "弱勢空頭 🔴" if curr < ma5 < ma10 else "區間震盪 🟡"
+            st.info(f"**短線趨勢**\n\n{trend}")
+        with t2:
+            bias = ((curr - ma20) / ma20) * 100
+            st.warning(f"**月線乖離**\n\n{bias:.2f}%")
+        with t3:
+            vol_ratio = (df_yf['Volume'].iloc[-1] / df_yf['Volume'].tail(5).mean())
+            st.success(f"**相對量能**\n\n{vol_ratio:.2f} 倍")
 
-        st.divider()
-
-        # --- 3. 量能監控 ---
-        st.subheader("📊 量能監控")
-        current_vol = df_yf['Volume'].iloc[-1] / 1000 
-        avg_vol = df_yf['Volume'].tail(5).mean() / 1000
-        vol_ratio = current_vol / avg_vol if avg_vol > 0 else 1
-        
-        v_col1, v_col2 = st.columns(2)
-        with v_col1:
-            st.metric("今日成交張數", f"{int(current_vol):,} 張")
-        with v_col2:
-            vol_status = "爆量攻擊" if vol_ratio > 1.5 else "量縮整理" if vol_ratio < 0.7 else "量能平穩"
-            st.metric("量能狀態", vol_status, f"{vol_ratio:.1f}x 均量")
+        # --- 3. 籌碼面監控 (法人動向) ---
+        st.subheader("👥 籌碼面追蹤 (法人近 3 日)")
+        if not df_inst.empty:
+            recent_inst = df_inst.tail(3).copy()
+            recent_inst['buy_net'] = recent_inst['buy'] - recent_inst['sell']
+            summary_inst = recent_inst.groupby('name')['buy_net'].sum().reset_index()
+            
+            i1, i2 = st.columns(2)
+            for idx, row in summary_inst.iterrows():
+                col = i1 if idx % 2 == 0 else i2
+                icon = "⬆️" if row['buy_net'] > 0 else "⬇️"
+                col.write(f"**{row['name']}**: {icon} {int(row['buy_net']):,} 股")
+        else:
+            st.write("暫無法人籌碼數據")
 
         st.divider()
 
@@ -82,24 +91,24 @@ if analyze_btn or stock_id:
         if news:
             for item in news[:5]:
                 with st.expander(item['title']):
-                    st.write(f"**來源：** {item['publisher']}")
+                    st.write(f"**來源：** {item['publisher']} | **時間：** {datetime.fromtimestamp(item['providerPublishTime']).strftime('%m/%d %H:%M')}")
                     st.link_button("閱讀完整內容", item['link'])
         else:
-            st.write("暫無相關新聞。")
+            st.write("目前無相關新聞報導。")
 
-        st.divider()
-
-        # --- 5. 綜合評價 ---
-        st.subheader("💡 AI 投資建議")
+        # --- 5. 綜合 AI 診斷評分 ---
+        st.subheader("💡 綜合診斷評分")
         score = 0
-        if current_price > ma5: score += 40
-        if vol_ratio > 1: score += 30
-        if bias < 5: score += 30
+        if curr > ma5: score += 30
+        if curr > ma20: score += 20
+        if vol_ratio > 1.2: score += 20
+        # 法人有買就加分
+        if not df_inst.empty and recent_inst['buy_net'].sum() > 0: score += 30
         
         st.progress(score / 100)
-        st.write(f"目前診斷總分：**{score} 分**")
+        st.write(f"當前 AI 綜合評分：**{score} 分**")
 
     except Exception as e:
-        st.error(f"分析失敗，請檢查代碼或資料。詳細訊息: {e}")
+        st.error(f"分析失敗，錯誤訊息: {e}")
 
-st.caption("數據僅供參考，投資有風險。")
+st.caption(f"最後更新時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 數據僅供參考")

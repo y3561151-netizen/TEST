@@ -86,16 +86,17 @@ if data:
     t3.metric("月線乖離率", f"{data['bias']:.1f}%")
     t4.metric("乖離狀態", "過熱" if data['bias'] > 10 else "安全", delta_color="inverse")
 
-    # 第二區：量能
-    st.subheader("📊 量能監控")
-    b1, b2, b3 = st.columns(3)
-    b1.metric("今日成交張數", f"{data['vol_today']:.0f} 張")
-    b2.metric("量能狀態", "爆量攻擊" if data['vol_today'] > data['v_ma5']*1.5 else "正常", delta=f"{data['vol_today']/data['v_ma5']:.1f}x 均量")
-    now = datetime.now()
-    m_open = now.replace(hour=9, minute=0, second=0)
-    elapsed = max((now - m_open).total_seconds() / 60, 1)
-    est = data['vol_today'] * (270 / elapsed) if now < now.replace(hour=13, minute=30, second=0) else data['vol_today']
-    b3.metric("今日預估量", f"{est:.0f} 張")
+    # --- 量能監控區塊 (已移除預估量) ---
+st.subheader("📊 量能監控")
+col1, col2 = st.columns(2)  # 改為兩欄佈局
+
+# 假設 current_vol 是當前張數, avg_vol 是均量
+vol_ratio = current_vol / avg_vol if avg_vol > 0 else 1
+vol_status = "爆量攻擊" if vol_ratio > 1.5 else "量縮整理" if vol_ratio < 0.7 else "量能平穩"
+vol_color = "normal" if "量能平穩" in vol_status else "inverse"
+
+col1.metric("今日成交張數", f"{int(current_vol):,} 張")
+col2.metric("量能狀態", vol_status, f"{vol_ratio:.1f}x 均量", delta_color=vol_color)
 
     # 第三區：AI 診斷報告
     st.divider()
@@ -111,20 +112,7 @@ if data:
     diag_df = pd.DataFrame(diag_rows, columns=["#", "項目", "診斷結果與標準定義", "狀態"])
     st.write(diag_df.to_html(index=False, justify='left'), unsafe_allow_html=True)
 
-    # 第四區：族群連動 (補回)
-    st.divider()
-    st.subheader("🔗 族群連動與強度 (紅漲綠跌)")
-    groups = {"AI/半導體": ["2330", "2317", "2454", "2382", "3231"], "航運": ["2603", "2609", "2615"], "金融": ["2881", "2882", "2891"]}
-    curr_grp = next((k for k, v in groups.items() if st.session_state.stock_id in v), "權值股")
-    related = [r for r in groups.get(curr_grp, ["2317", "2454"]) if r != st.session_state.stock_id]
-    r_cols = st.columns(len(related))
-    for i, rid in enumerate(related):
-        try:
-            rh = yf.download(f"{rid}.TW", period="2d", progress=False)
-            rh.columns = rh.columns.get_level_values(0) if isinstance(rh.columns, pd.MultiIndex) else rh.columns
-            diff = ((rh['Close'].iloc[-1] / rh['Close'].iloc[-2]) - 1) * 100
-            r_cols[i].metric(rid, f"{rh['Close'].iloc[-1]:.1f}", f"{diff:.1f}%", delta_color="inverse")
-        except: continue
+
 
     # 第五區：新聞
     st.divider()

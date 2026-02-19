@@ -111,9 +111,6 @@ col2.metric("量能狀態", vol_status, f"{vol_ratio:.1f}x 均量", delta_color=
     else: st.info(f"⚖️ 綜合評價：中性觀望 (得分: {data['score']}/4)")
     diag_df = pd.DataFrame(diag_rows, columns=["#", "項目", "診斷結果與標準定義", "狀態"])
     st.write(diag_df.to_html(index=False, justify='left'), unsafe_allow_html=True)
-
-
-
     # 第五區：新聞
     st.divider()
     st.subheader("📰 即時相關新聞")

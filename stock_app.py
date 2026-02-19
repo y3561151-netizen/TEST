@@ -5,7 +5,7 @@ from FinMind.data import DataLoader
 from datetime import datetime, timedelta
 
 # --- 設定區 ---
-FINMIND_TOKEN = "這裡貼上你的Token" 
+FINMIND_TOKEN = st.secrets["FINMIND_TOKEN"] 
 st.set_page_config(page_title="台股智慧分析師 Pro Max", layout="wide")
 
 # 1. 初始化狀態
@@ -141,3 +141,4 @@ if data:
     except: st.warning("新聞模組讀取失敗。")
 else:
     st.error("查無數據，請確認代號是否正確。")
+

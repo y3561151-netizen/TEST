@@ -12,13 +12,19 @@ st.set_page_config(page_title="台股智慧分析師 Pro Max", layout="wide")
 if 'stock_id' not in st.session_state:
     st.session_state.stock_id = "2330"
 if 'custom_list' not in st.session_state:
-    st.session_state.custom_list = "2330, 2317, 2454, 2382, 3231, 2603, 1513, 2881"
+    st.session_state.custom_list = "2330, 2317, 2454, 8069, 3293, 2603, 1513, 2881"
 
 # --- 核心數據函式 ---
 def get_stock_analysis(sid):
     try:
+        # --- 修改處：自動判斷上市 (.TW) 或 上櫃 (.TWO) ---
         df = yf.download(f"{sid}.TW", period="6mo", progress=False)
+        if df.empty:
+            df = yf.download(f"{sid}.TWO", period="6mo", progress=False)
+            
         if df.empty: return None
+        
+        # 處理 MultiIndex 欄位問題
         df.columns = df.columns.get_level_values(0) if isinstance(df.columns, pd.MultiIndex) else df.columns
         
         df['5MA'] = df['Close'].rolling(5).mean()
@@ -30,6 +36,7 @@ def get_stock_analysis(sid):
         p_close, ma5, ma10, ma20 = float(latest['Close']), float(latest['5MA']), float(latest['10MA']), float(latest['20MA'])
         vol_today, v_ma5 = float(latest['Volume'])/1000, float(latest['5VMA'])/1000
         
+        # FinMind 籌碼與新聞部分
         dl = DataLoader()
         dl.login_by_token(api_token=FINMIND_TOKEN)
         inst = dl.taiwan_stock_institutional_investors(stock_id=sid, start_date=(datetime.now() - timedelta(days=12)).strftime('%Y-%m-%d'))
@@ -46,12 +53,14 @@ def get_stock_analysis(sid):
             "consecutive": consecutive_buy, "total_inst_3d": total_inst_3d, 
             "bias": ((p_close - ma20) / ma20) * 100
         }
-    except: return None
+    except Exception as e:
+        return None
 
 # --- 2. 側邊欄 ---
 with st.sidebar:
     st.title("⚙️ 診斷設定")
-    st.text_input("輸入台股代號", key="stock_id")
+    # 這裡讓使用者輸入純數字代號
+    st.text_input("輸入台股代號 (上市/上櫃)", key="stock_id")
     st.divider()
     st.title("🎯 選股神器 2.0")
     input_list = st.text_area("編輯掃描清單", st.session_state.custom_list)
@@ -64,7 +73,8 @@ with st.sidebar:
                 if res and res['score'] >= 3:
                     label = f"🚀 {s_id} ({res['score']}分)"
                     if res['consecutive']: label += " 🔥連買"
-                    if st.button(label, key=f"btn_{s_id}"):
+                    # 使用唯一 Key 避免 Streamlit 報錯
+                    if st.button(label, key=f"btn_scan_{s_id}"):
                         st.session_state.stock_id = s_id
                         st.rerun()
 
@@ -76,7 +86,10 @@ with st.sidebar:
 data = get_stock_analysis(st.session_state.stock_id)
 
 if data:
-    st.header(f"📈 {st.session_state.stock_id} 深度診斷 | 最新價格：{data['p_close']:.2f}")
+    # 判斷當前是上市還是上櫃（僅顯示用）
+    market_suffix = "上市" if yf.download(f"{st.session_state.stock_id}.TWO", period="1d", progress=False).empty else "上櫃"
+    
+    st.header(f"📈 {st.session_state.stock_id} 深度診斷 ({market_suffix}) | 最新價格：{data['p_close']:.2f}")
 
     # 第一區：趨勢與風險
     st.subheader("📍 趨勢指標與風險")
@@ -91,7 +104,6 @@ if data:
     b1, b2, b3 = st.columns(3)
     b1.metric("今日成交張數", f"{data['vol_today']:.0f} 張")
     b2.metric("量能狀態", "爆量攻擊" if data['vol_today'] > data['v_ma5']*1.5 else "正常", delta=f"{data['vol_today']/data['v_ma5']:.1f}x 均量")
-    now = datetime.now()
     
     # 第三區：AI 診斷報告
     st.divider()
@@ -121,4 +133,4 @@ if data:
         else: st.info("近期無相關新聞。")
     except: st.warning("新聞模組讀取失敗。")
 else:
-    st.error("查無數據，請確認代號是否正確。")
+    st.error(f"查無 {st.session_state.stock_id} 數據，請確認代號是否正確。")

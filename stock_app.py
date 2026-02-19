@@ -111,21 +111,6 @@ if data:
     diag_df = pd.DataFrame(diag_rows, columns=["#", "項目", "診斷結果與標準定義", "狀態"])
     st.write(diag_df.to_html(index=False, justify='left'), unsafe_allow_html=True)
 
-    # 第四區：族群連動 (補回)
-    st.divider()
-    st.subheader("🔗 族群連動與強度 (紅漲綠跌)")
-    groups = {"AI/半導體": ["2330", "2317", "2454", "2382", "3231"], "航運": ["2603", "2609", "2615"], "金融": ["2881", "2882", "2891"]}
-    curr_grp = next((k for k, v in groups.items() if st.session_state.stock_id in v), "權值股")
-    related = [r for r in groups.get(curr_grp, ["2317", "2454"]) if r != st.session_state.stock_id]
-    r_cols = st.columns(len(related))
-    for i, rid in enumerate(related):
-        try:
-            rh = yf.download(f"{rid}.TW", period="2d", progress=False)
-            rh.columns = rh.columns.get_level_values(0) if isinstance(rh.columns, pd.MultiIndex) else rh.columns
-            diff = ((rh['Close'].iloc[-1] / rh['Close'].iloc[-2]) - 1) * 100
-            r_cols[i].metric(rid, f"{rh['Close'].iloc[-1]:.1f}", f"{diff:.1f}%", delta_color="inverse")
-        except: continue
-
     # 第五區：新聞
     st.divider()
     st.subheader("📰 即時相關新聞")
@@ -141,4 +126,5 @@ if data:
     except: st.warning("新聞模組讀取失敗。")
 else:
     st.error("查無數據，請確認代號是否正確。")
+
 

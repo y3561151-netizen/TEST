@@ -92,11 +92,7 @@ if data:
     b1.metric("今日成交張數", f"{data['vol_today']:.0f} 張")
     b2.metric("量能狀態", "爆量攻擊" if data['vol_today'] > data['v_ma5']*1.5 else "正常", delta=f"{data['vol_today']/data['v_ma5']:.1f}x 均量")
     now = datetime.now()
-    m_open = now.replace(hour=9, minute=0, second=0)
-    elapsed = max((now - m_open).total_seconds() / 60, 1)
-    est = data['vol_today'] * (270 / elapsed) if now < now.replace(hour=13, minute=30, second=0) else data['vol_today']
-    b3.metric("今日預估量", f"{est:.0f} 張")
-
+    
     # 第三區：AI 診斷報告
     st.divider()
     st.subheader("🤖 AI 投資客綜合診斷")
@@ -126,5 +122,6 @@ if data:
     except: st.warning("新聞模組讀取失敗。")
 else:
     st.error("查無數據，請確認代號是否正確。")
+
 
 

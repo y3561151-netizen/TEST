@@ -13,8 +13,6 @@ FINMIND_TOKEN = st.secrets.get("FINMIND_TOKEN", "")
 # 1. 初始化狀態
 if 'stock_id' not in st.session_state:
     st.session_state.stock_id = "2330"
-if 'custom_list' not in st.session_state:
-    st.session_state.custom_list = "2330, 2317, 2454, 8069, 3293, 2603, 1513"
 
 # --- 核心數據函式 ---
 def get_stock_analysis(sid):
@@ -23,132 +21,88 @@ def get_stock_analysis(sid):
         df = yf.download(f"{sid}.TW", period="8mo", progress=False)
         if df.empty:
             df = yf.download(f"{sid}.TWO", period="8mo", progress=False)
-        
         if df.empty: return None
         
-        # 處理 yfinance 欄位結構
         df.columns = df.columns.get_level_values(0) if isinstance(df.columns, pd.MultiIndex) else df.columns
         
-        # 計算技術指標
+        # 指標計算
         df['5MA'] = df['Close'].rolling(5).mean()
         df['10MA'] = df['Close'].rolling(10).mean()
         df['20MA'] = df['Close'].rolling(20).mean()
         df['20VMA'] = df['Volume'].rolling(20).mean()
         
-        latest = df.iloc[-1]
-        prev = df.iloc[-2]
-        five_days_ago = df.iloc[-6]
-        
-        p_close = float(latest['Close'])
-        p_change = p_close - float(prev['Close'])
-        ma5, ma10, ma20 = float(latest['5MA']), float(latest['10MA']), float(latest['20MA'])
-        ma20_old = float(five_days_ago['20MA'])
-        ma5_old = float(prev['5MA'])
-        vol_today, v_ma20 = float(latest['Volume']), float(latest['20VMA'])
+        l, p, f = df.iloc[-1], df.iloc[-2], df.iloc[-6]
+        p_close, p_change = float(l['Close']), float(l['Close']) - float(p['Close'])
+        ma5, ma10, ma20 = float(l['5MA']), float(l['10MA']), float(l['20MA'])
+        ma20_old, ma5_old = float(f['20MA']), float(p['5MA'])
+        vol_today, v_ma20 = float(l['Volume']), float(l['20VMA'])
 
-        # --- 新邏輯：四項診斷條件 ---
-        # 1. 技術趨勢：站上月線 且 月線向上
-        cond_1 = (p_close > ma20) and (ma20 > ma20_old)
+        # --- 四大診斷條件 ---
+        c1 = (p_close > ma20) and (ma20 > ma20_old) # 1. 趨勢：月線站上且向上
+        c2 = (ma5 > ma10 > ma20) and (ma5 > ma5_old) # 2. 動能：三線多頭且5MA向上
+        c3 = (vol_today > v_ma20 * 1.5) and (p_change > 0) # 3. 量能：價漲量增 1.5x
         
-        # 2. 技術動能：5 > 10 > 20 多頭排列 且 5MA 斜率向上
-        cond_2 = (ma5 > ma10 > ma20) and (ma5 > ma5_old)
-        
-        # 3. 成交量能：成交量 > 20日均量 1.5倍 且 價漲
-        cond_3 = (vol_today > v_ma20 * 1.5) and (p_change > 0)
-        
-        # 4. 籌碼力道：投信買超
-        sitc_buy, foreign_buy = False, False
+        # 4. 籌碼力道細分
+        sitc_buy, foreign_buy, total_inst_buy = False, False, False
         try:
             dl = DataLoader()
             dl.login_by_token(api_token=FINMIND_TOKEN)
             inst = dl.taiwan_stock_institutional_investors(stock_id=sid, start_date=(datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d'))
             if not inst.empty:
-                last_date = inst['date'].max()
-                today_inst = inst[inst['date'] == last_date]
-                sitc_net = today_inst[today_inst['name'] == 'Investment_Trust']['buy'].sum() - today_inst[today_inst['name'] == 'Investment_Trust']['sell'].sum()
-                foreign_net = today_inst[today_inst['name'] == 'Foreign_Investor']['buy'].sum() - today_inst[today_inst['name'] == 'Foreign_Investor']['sell'].sum()
-                sitc_buy = sitc_net > 0
-                foreign_buy = foreign_net > 0
-        except:
-            pass
+                last_d = inst['date'].max()
+                t_inst = inst[inst['date'] == last_d]
+                s_net = t_inst[t_inst['name'] == 'Investment_Trust']['buy'].sum() - t_inst[t_inst['name'] == 'Investment_Trust']['sell'].sum()
+                f_net = t_inst[t_inst['name'] == 'Foreign_Investor']['buy'].sum() - t_inst[t_inst['name'] == 'Foreign_Investor']['sell'].sum()
+                sitc_buy = s_net > 0
+                foreign_buy = f_net > 0
+                total_inst_buy = (s_net + f_net) > 0 # 僅計算投信與外資總和
+        except: pass
+
+        # 評分與狀態判定
+        tech_pass = c1 and c2
+        score = sum([c1, c2, c3, sitc_buy])
         
-        # --- 評分機制調整 ---
-        # 門檻：1 和 2 必須同時成立
-        tech_pass = cond_1 and cond_2
-        score = sum([cond_1, cond_2, cond_3, sitc_buy])
-        
-        if not tech_pass:
-            status = "📉 弱勢整理 (技術面未達標)"
-        elif tech_pass and sitc_buy and cond_3:
-            status = "🚀 強力關注 (全方位達標)"
-        elif tech_pass and sitc_buy:
-            status = "🔥 趨勢偏多 (投信加持)"
-        else:
-            status = "👀 觀察 (技術過、籌碼未跟)"
+        if not tech_pass: status = "📉 弱勢整理 (技術門檻未過)"
+        elif sitc_buy and foreign_buy and c3: status = "🚀 強力關注 (雙資併買+量能攻擊)"
+        elif sitc_buy: status = "🔥 趨勢偏多 (投信積極介入)"
+        else: status = "👀 觀察 (技術過、籌碼普普)"
 
         return {
-            "p_close": p_close, "ma5": ma5, "ma10": ma10, "ma20": ma20,
-            "vol_today": vol_today/1000, "v_ma20": v_ma20/1000,
-            "cond_1": cond_1, "cond_2": cond_2, "cond_3": cond_3, "cond_4": sitc_buy,
-            "sitc_buy": sitc_buy, "foreign_buy": foreign_buy,
-            "score": score, "status": status, "bias": ((p_close - ma20) / ma20) * 100
+            "p_close": p_close, "ma20": ma20, "score": score, "status": status,
+            "c1": c1, "c2": c2, "c3": c3, "sitc_buy": sitc_buy, "foreign_buy": foreign_buy, "total_inst_buy": total_inst_buy
         }
     except: return None
 
-# --- 側邊欄 ---
-with st.sidebar:
-    st.title("⚙️ 診斷設定")
-    st.text_input("輸入台股代號", key="stock_id")
-    st.divider()
-    st.title("🎯 選股神器 2.0")
-    input_list = st.text_area("編輯掃描清單", st.session_state.custom_list)
-    if st.button("開始 AI 掃描"):
-        st.session_state.custom_list = input_list
-        scan_list = [s.strip() for s in input_list.split(",")]
-        with st.status("同步掃描中...", expanded=False):
-            for s_id in scan_list:
-                res = get_stock_analysis(s_id)
-                if res and "強力關注" in res['status']:
-                    if st.button(f"🚀 {s_id} (強力關注)", key=f"btn_{s_id}"):
-                        st.session_state.stock_id = s_id
-                        st.rerun()
-
 # --- 主畫面 ---
+st.sidebar.title("⚙️ 診斷設定")
+stock_input = st.sidebar.text_input("輸入台股代號", value="2330")
+if st.sidebar.button("立即診斷"):
+    st.session_state.stock_id = stock_input
+
 data = get_stock_analysis(st.session_state.stock_id)
 
 if data:
-    st.header(f"📈 {st.session_state.stock_id} 深度診斷 | {data['status']}")
+    st.header(f"📈 {st.session_state.stock_id} 深度診斷報告")
+    st.subheader(f"🤖 綜合評價：{data['status']}")
     
-    # 核心指標展示
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("價格", f"{data['p_close']:.2f}")
-    c2.metric("月線乖離", f"{data['bias']:.1f}%")
-    c3.metric("今日張數", f"{data['vol_today']:.0f}張")
-    c4.metric("投信動向", "買超" if data['sitc_buy'] else "未買")
-
-    # AI 診斷表
-    st.divider()
-    st.subheader("🤖 AI 投資客嚴謹診斷")
+    # 診斷表格內容更新
     diag_rows = [
-        ["1", "技術趨勢", "✅ 站上月線且月線向上" if data['cond_1'] else "❌ 月線下彎或股價未站上", "通過" if data['cond_1'] else "失敗"],
-        ["2", "技術動能", "✅ 5>10>20 多頭且5MA向上" if data['cond_2'] else "❌ 排列混亂或動能轉弱", "通過" if data['cond_2'] else "失敗"],
-        ["3", "成交量能", "✅ 量增價漲 (1.5倍量)" if data['cond_3'] else "⚖️ 量縮或價跌", "加分" if data['cond_3'] else "不加分"],
-        ["4", "籌碼力道", "🔥 投信+外資雙買" if (data['sitc_buy'] and data['foreign_buy']) else "✅ 投信買超" if data['sitc_buy'] else "❌ 籌碼無優勢", "強勢" if data['sitc_buy'] else "一般"]
+        ["1", "技術趨勢", "✅ 站上月線且月線向上" if data['c1'] else "❌ 月線下彎或股價未站上", "通過" if data['c1'] else "未過"],
+        ["2", "技術動能", "✅ 5>10>20 多頭排列" if data['c2'] else "❌ 均線排列混亂", "通過" if data['c2'] else "未過"],
+        ["3", "成交量能", "✅ 價漲且量增 1.5 倍" if data['c3'] else "⚖️ 量能縮減或價跌", "加分" if data['c3'] else "無"],
+        ["4", "投信動向 (核心)", "🔥 投信買超中" if data['sitc_buy'] else "❌ 投信無動作", "通過" if data['sitc_buy'] else "未過"],
+        ["5", "外資動向 (輔助)", "✅ 外資買超中" if data['foreign_buy'] else "⚖️ 外資賣超或無動作", "加分" if data['foreign_buy'] else "無"],
+        ["6", "法人整體 (投+外)", "🚀 雙法人同步作多" if (data['sitc_buy'] and data['foreign_buy']) else "⚖️ 意見分歧", "強勢" if data['total_inst_buy'] else "保守"]
     ]
-    diag_df = pd.DataFrame(diag_rows, columns=["#", "項目", "診斷結果與標準定義", "狀態"])
+    
+    diag_df = pd.DataFrame(diag_rows, columns=["#", "診斷指標", "標準定義與現況", "狀態"])
     st.write(diag_df.to_html(index=False, justify='left'), unsafe_allow_html=True)
 
-    # 新聞模組
-    st.divider()
-    st.subheader("📰 即時相關新聞")
-    try:
-        dl = DataLoader()
-        dl.login_by_token(api_token=FINMIND_TOKEN)
-        news = dl.taiwan_stock_news(stock_id=st.session_state.stock_id, start_date=(datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d'))
-        if not news.empty:
-            for _, row in news.head(5).iterrows():
-                with st.expander(f"📌 {row['title']}"):
-                    st.write(f"來源: {row['source']} | [連結]({row['link']})")
-    except: st.write("新聞讀取中或 API 限制。")
+    # 視覺化提示
+    if "強力關注" in data['status']:
+        st.success("🎯 符合「技術門檻過關 + 雙法人連買 + 量能發動」之完美模型！")
+    elif "未過" in data['status']:
+        st.error("⚠️ 技術面尚未成形，建議維持觀望，避開下彎均線風險。")
+
 else:
-    st.error("查無數據，請確認代號並稍後再試。")
+    st.error("請確認輸入的代號是否正確，或稍後再試。")

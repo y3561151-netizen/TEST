@@ -83,40 +83,117 @@ with st.sidebar:
     st.write(logic_df.to_html(index=False, justify='center'), unsafe_allow_html=True)
 
 # --- 3. 主畫面 ---
-data = get_stock_analysis(st.session_state.stock_id)
+def get_stock_analysis(sid):
+    try:
+        # 自動判定上市櫃抓取資料
+        df = yf.download(f"{sid}.TW", period="8mo", progress=False) # 增加長度以計算斜率
+        if df.empty:
+            df = yf.download(f"{sid}.TWO", period="8mo", progress=False)
+        if df.empty: return None
+        
+        df.columns = df.columns.get_level_values(0) if isinstance(df.columns, pd.MultiIndex) else df.columns
+        
+        # --- 技術指標計算 ---
+        df['5MA'] = df['Close'].rolling(5).mean()
+        df['10MA'] = df['Close'].rolling(10).mean()
+        df['20MA'] = df['Close'].rolling(20).mean()
+        df['20VMA'] = df['Volume'].rolling(20).mean() # 改採 20 日均量
+        
+        latest = df.iloc[-1]
+        prev = df.iloc[-2]
+        five_days_ago = df.iloc[-6]
+        
+        p_close = float(latest['Close'])
+        p_change = p_close - float(prev['Close']) # 今日漲跌
+        
+        ma5, ma10, ma20 = float(latest['5MA']), float(latest['10MA']), float(latest['20MA'])
+        ma20_old = float(five_days_ago['20MA'])
+        ma5_old = float(prev['5MA'])
+        
+        vol_today = float(latest['Volume'])
+        v_ma20 = float(latest['20VMA'])
+        
+        # --- 1. 技術趨勢：站上月線 且 月線向上 ---
+        cond_1 = (p_close > ma20) and (ma20 > ma20_old)
+        
+        # --- 2. 技術動能：5 > 10 > 20 多頭排列 且 5MA 斜率向上 ---
+        cond_2 = (ma5 > ma10 > ma20) and (ma5 > ma5_old)
+        
+        # --- 3. 成交量能：量增 (1.5倍) 且 價漲 ---
+        cond_3 = (vol_today > v_ma20 * 1.5) and (p_change > 0)
+        
+        # --- 4. 籌碼力道：投信優先 ---
+        dl = DataLoader()
+        dl.login_by_token(api_token=FINMIND_TOKEN)
+        inst = dl.taiwan_stock_institutional_investors(stock_id=sid, start_date=(datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d'))
+        
+        sitc_buy = False # 投信
+        foreign_buy = False # 外資
+        if not inst.empty:
+            # 抓取最後一天的法人資料
+            last_date = inst['date'].max()
+            today_inst = inst[inst['date'] == last_date]
+            
+            sitc_data = today_inst[today_inst['name'] == 'Investment_Trust']
+            foreign_data = today_inst[today_inst['name'] == 'Foreign_Investor']
+            
+            if not sitc_data.empty and (sitc_data['buy'].sum() - sitc_data['sell'].sum()) > 0:
+                sitc_buy = True
+            if not foreign_data.empty and (foreign_data['buy'].sum() - foreign_data['sell'].sum()) > 0:
+                foreign_buy = True
+        
+        # 籌碼過關定義：投信買超 (單獨過) 或 投信+外資買超 (強力過)
+        cond_4 = sitc_buy # 依照你的需求，投信買超才算過
+        
+        # --- 最終評分與評價邏輯 ---
+        final_score = 0
+        if cond_1: final_score += 1
+        if cond_2: final_score += 1
+        if cond_3: final_score += 1
+        if cond_4: final_score += 1
+        
+        status = "整理中"
+        if cond_1 and cond_2:
+            if cond_3 and cond_4:
+                status = "🚀 強力關注 (全過)"
+            elif cond_4:
+                status = "🔥 趨勢偏多 (籌碼加持)"
+            else:
+                status = "👀 觀察 (技術過但籌碼未跟)"
+        else:
+            status = "📉 弱勢/未成形"
 
-if data:
-    # 判斷當前是上市還是上櫃（僅顯示用）
-    market_suffix = "上市" if yf.download(f"{st.session_state.stock_id}.TWO", period="1d", progress=False).empty else "上櫃"
+        return {
+            "p_close": p_close, "ma5": ma5, "ma10": ma10, "ma20": ma20,
+            "vol_today": vol_today / 1000, "v_ma20": v_ma20 / 1000,
+            "cond_1": cond_1, "cond_2": cond_2, "cond_3": cond_3, "cond_4": cond_4,
+            "sitc_buy": sitc_buy, "foreign_buy": foreign_buy,
+            "score": final_score, "status": status,
+            "bias": ((p_close - ma20) / ma20) * 100
+        }
+    except: return None
     
-    st.header(f"📈 {st.session_state.stock_id} 深度診斷 ({market_suffix}) | 最新價格：{data['p_close']:.2f}")
-
-    # 第一區：趨勢與風險
-    st.subheader("📍 趨勢指標與風險")
-    t1, t2, t3, t4 = st.columns(4)
-    t1.metric("短線趨勢 (5MA>10MA)", "🔴 多方" if data['ma5'] > data['ma10'] else "🟢 空方")
-    t2.metric("長線趨勢 (價格>20MA)", "🔴 多方" if data['p_close'] > data['ma20'] else "🟢 空方")
-    t3.metric("月線乖離率", f"{data['bias']:.1f}%")
-    t4.metric("乖離狀態", "過熱" if data['bias'] > 10 else "安全", delta_color="inverse")
-
-    # 第二區：量能
-    st.subheader("📊 量能監控")
-    b1, b2, b3 = st.columns(3)
-    b1.metric("今日成交張數", f"{data['vol_today']:.0f} 張")
-    b2.metric("量能狀態", "爆量攻擊" if data['vol_today'] > data['v_ma5']*1.5 else "正常", delta=f"{data['vol_today']/data['v_ma5']:.1f}x 均量")
-    
-    # 第三區：AI 診斷報告
+   # --- 第三區：AI 診斷報告 ---
     st.divider()
-    st.subheader("🤖 AI 投資客綜合診斷")
+    st.subheader(f"🤖 AI 投資客綜合診斷：{data['status']}")
+    
+    # 建立診斷表格資料
     diag_rows = [
-        ["1", "技術趨勢", "✅ 站上月線" if data['p_close'] > data['ma20'] else "❌ 月線之下", "多方" if data['p_close'] > data['ma20'] else "空方"],
-        ["2", "技術動能", "✅ 5MA > 10MA" if data['ma5'] > data['ma10'] else "❌ 5MA < 10MA", "強勁" if data['ma5'] > data['ma10'] else "疲弱"],
-        ["3", "成交量能", "✅ 今日帶量發動" if data['vol_today'] > data['v_ma5'] else "⚖️ 量能縮減", "熱絡" if data['vol_today'] > data['v_ma5'] else "常態"],
-        ["4", "籌碼力道", "🔥 法人連續 3 日連買" if data['consecutive'] else "✅ 法人買超" if data['total_inst_3d'] > 0 else "❌ 法人賣出", "推升" if data['total_inst_3d'] > 0 else "壓力"]
+        ["1", "技術趨勢", "✅ 站上月線且月線向上" if data['cond_1'] else "❌ 趨勢未成 (月線向下或股價其下)", "多方" if data['cond_1'] else "偏弱"],
+        ["2", "技術動能", "✅ 5>10>20 多頭且5MA向上" if data['cond_2'] else "❌ 動能不足 (未排列或斜率向下)", "強勁" if data['cond_2'] else "疲弱"],
+        ["3", "成交量能", "✅ 量增價漲 (1.5倍均量)" if data['cond_3'] else "⚖️ 量縮或量增價跌", "攻擊" if data['cond_3'] else "保守"],
+        ["4", "籌碼力道", "🔥 投信+外資雙買" if (data['sitc_buy'] and data['foreign_buy']) else "✅ 投信買超" if data['sitc_buy'] else "❌ 籌碼不具優勢", "推升" if data['sitc_buy'] else "壓力"]
     ]
-    if data['score'] >= 3: st.success(f"🔥 綜合評價：強力關注 (得分: {data['score']}/4)")
-    else: st.info(f"⚖️ 綜合評價：中性觀望 (得分: {data['score']}/4)")
-    diag_df = pd.DataFrame(diag_rows, columns=["#", "項目", "診斷結果與標準定義", "狀態"])
+    
+    # 根據評價等級顯示不同顏色
+    if "強力關注" in data['status']:
+        st.success(f"🏆 綜合評價：{data['status']} (得分: {data['score']}/4)")
+    elif "觀察" in data['status'] or "趨勢偏多" in data['status']:
+        st.warning(f"💡 綜合評價：{data['status']} (得分: {data['score']}/4)")
+    else:
+        st.error(f"⚠️ 綜合評價：{data['status']} (得分: {data['score']}/4)")
+        
+    diag_df = pd.DataFrame(diag_rows, columns=["#", "項目", "診斷結果與嚴謹標準", "狀態"])
     st.write(diag_df.to_html(index=False, justify='left'), unsafe_allow_html=True)
 
     # 第五區：新聞
@@ -134,4 +211,5 @@ if data:
     except: st.warning("新聞模組讀取失敗。")
 else:
     st.error(f"查無 {st.session_state.stock_id} 數據，請確認代號是否正確。")
+
 

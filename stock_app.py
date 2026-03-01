@@ -100,10 +100,10 @@ if data:
     diag_rows = [
         ["1", "技術趨勢", "✅ 站上月線且月線向上" if data['c1'] else "❌ 月線下彎或股價未站上", "通過" if data['c1'] else "失敗"],
         ["2", "技術動能", "✅ 5>10>20 多頭排列且5MA向上" if data['c2'] else "❌ 排列混亂或動能轉弱", "通過" if data['c2'] else "失敗"],
-        ["3", "成交量能", "✅ 價漲且量增 1.5 倍" if data['c3'] else "⚖️ 量能不足或價跌", "加分" if data['c3'] else "無"],
-        ["4", "投信指標", "🔥 投信買超中 (最重要指標)" if data['sitc_buy'] else "❌ 投信無動作", "通過" if data['sitc_buy'] else "未過"],
-        ["5", "外資指標", "✅ 外資同步買超" if data['foreign_buy'] else "⚖️ 外資賣超或無動作", "加分" if data['foreign_buy'] else "無"],
-        ["6", "法人共識", "🚀 投信與外資聯手作多" if (data['sitc_buy'] and data['foreign_buy']) else "⚖️ 意見分歧", "強勢" if data['sitc_buy'] else "保守"]
+        ["3", "成交量能", "✅ 價漲且量增 1.5 倍" if data['c3'] else "❌ 量能不足或價跌", "加分" if data['c3'] else "無"],
+        ["4", "投信指標", "✅ 投信買超中 (最重要指標)" if data['sitc_buy'] else "❌ 投信無動作", "通過" if data['sitc_buy'] else "未過"],
+        ["5", "外資指標", "✅ 外資同步買超" if data['foreign_buy'] else "❌ 外資賣超或無動作", "加分" if data['foreign_buy'] else "無"],
+        ["6", "法人共識", "✅ 投信與外資聯手作多" if (data['sitc_buy'] and data['foreign_buy']) else "❌ 意見分歧", "強勢" if data['sitc_buy'] else "保守"]
     ]
     diag_df = pd.DataFrame(diag_rows, columns=["#", "診斷指標項目", "詳細標準定義與現況", "判定"])
     st.write(diag_df.to_html(index=False, justify='left'), unsafe_allow_html=True)
@@ -126,3 +126,4 @@ else:
     st.error(f"❌ 查無代號 {st.session_state.stock_id}。請檢查代號是否正確。")
 
 st.caption(f"更新時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 嚴謹邏輯版 V3.0")
+

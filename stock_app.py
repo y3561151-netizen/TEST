@@ -106,18 +106,54 @@ if data:
     b2.metric("量能狀態", "爆量攻擊" if data['vol_today'] > data['v_ma5']*1.5 else "正常", delta=f"{data['vol_today']/data['v_ma5']:.1f}x 均量")
     
     # 第三區：AI 診斷報告
-    st.divider()
-    st.subheader("🤖 AI 投資客綜合診斷")
-    diag_rows = [
-        ["1", "技術趨勢", "✅ 站上月線" if data['p_close'] > data['ma20'] else "❌ 月線之下", "多方" if data['p_close'] > data['ma20'] else "空方"],
-        ["2", "技術動能", "✅ 5MA > 10MA" if data['ma5'] > data['ma10'] else "❌ 5MA < 10MA", "強勁" if data['ma5'] > data['ma10'] else "疲弱"],
-        ["3", "成交量能", "✅ 今日帶量發動" if data['vol_today'] > data['v_ma5'] else "⚖️ 量能縮減", "熱絡" if data['vol_today'] > data['v_ma5'] else "常態"],
-        ["4", "籌碼力道", "🔥 法人連續 3 日連買" if data['consecutive'] else "✅ 法人買超" if data['total_inst_3d'] > 0 else "❌ 法人賣出", "推升" if data['total_inst_3d'] > 0 else "壓力"]
-    ]
-    if data['score'] >= 3: st.success(f"🔥 綜合評價：強力關注 (得分: {data['score']}/4)")
-    else: st.info(f"⚖️ 綜合評價：中性觀望 (得分: {data['score']}/4)")
-    diag_df = pd.DataFrame(diag_rows, columns=["#", "項目", "診斷結果與標準定義", "狀態"])
-    st.write(diag_df.to_html(index=False, justify='left'), unsafe_allow_html=True)
+st.divider()
+st.subheader("🤖 AI 投資客綜合診斷")
+
+# === 條件判斷 ===
+
+# 1. 技術趨勢：站上月線 且 月線向上
+trend_ok = data['p_close'] > data['ma20'] and data['ma20'] > data['ma20_5d_ago']
+trend_text = "✅ 站上月線且月線向上" if trend_ok else ("⚠️ 站上月線但月線向下" if data['p_close'] > data['ma20'] else "❌ 月線之下")
+trend_status = "強勢多方" if trend_ok else ("弱勢反彈" if data['p_close'] > data['ma20'] else "空方")
+
+# 2. 技術動能：三線多頭排列 且 5MA斜率向上
+momentum_ok = data['ma5'] > data['ma10'] > data['ma20'] and data['ma5'] > data['ma5_yesterday']
+momentum_text = "✅ 三線多頭且動能向上" if momentum_ok else ("⚠️ 5MA>10MA但排列不完整" if data['ma5'] > data['ma10'] else "❌ 均線空頭排列")
+momentum_status = "強勁" if momentum_ok else ("普通" if data['ma5'] > data['ma10'] else "疲弱")
+
+# 3. 成交量能：今日量 > 20日均量1.5倍 且 收紅（量增價漲）
+price_up = data['p_close'] > data['p_open']
+vol_strong = data['vol_today'] > data['v_ma20'] * 1.5
+volume_ok = vol_strong and price_up
+volume_text = "✅ 量增價漲（突破均量1.5倍）" if volume_ok else ("⚠️ 帶量但收黑（注意出貨）" if vol_strong and not price_up else "❌ 量能不足")
+volume_status = "熱絡" if volume_ok else ("警示" if vol_strong and not price_up else "常態")
+
+# 4. 籌碼力道：投信優先，外資+投信更強
+inst_strong = data['trust_3d'] > 0 and data['foreign_3d'] > 0   # 外資+投信同買
+inst_ok = data['trust_3d'] > 0                                    # 至少投信買超
+chip_text = "🔥 外資+投信聯合買超" if inst_strong else ("✅ 投信持續買超" if inst_ok else ("⚠️ 僅外資買超" if data['foreign_3d'] > 0 else "❌ 法人賣出"))
+chip_status = "強力推升" if inst_strong else ("推升" if inst_ok else ("觀望" if data['foreign_3d'] > 0 else "壓力"))
+
+# === 評分邏輯：技術面必須同時過才有資格 ===
+tech_pass = trend_ok and momentum_ok   # 技術面是基本門檻
+score = sum([trend_ok, momentum_ok, volume_ok, inst_ok])
+
+if tech_pass and score >= 3:
+    st.success(f"🔥 綜合評價：強力關注 (得分: {score}/4)")
+elif tech_pass and score == 2:
+    st.warning(f"👀 綜合評價：技術面穩固，持續觀察 (得分: {score}/4)")
+else:
+    st.info(f"⚖️ 綜合評價：中性觀望 (得分: {score}/4)")
+
+diag_rows = [
+    ["1", "技術趨勢", trend_text, trend_status],
+    ["2", "技術動能", momentum_text, momentum_status],
+    ["3", "成交量能", volume_text, volume_status],
+    ["4", "籌碼力道", chip_text, chip_status],
+]
+
+diag_df = pd.DataFrame(diag_rows, columns=["#", "項目", "診斷結果與標準定義", "狀態"])
+st.write(diag_df.to_html(index=False, justify='left'), unsafe_allow_html=True)
 
     # 第五區：新聞
     st.divider()
@@ -134,3 +170,4 @@ if data:
     except: st.warning("新聞模組讀取失敗。")
 else:
     st.error(f"查無 {st.session_state.stock_id} 數據，請確認代號是否正確。")
+

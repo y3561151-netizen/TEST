@@ -22,6 +22,16 @@ def get_stock_analysis(sid):
             df = yf.download(f"{sid}.TWO", period="6mo", progress=False)
             
         if df.empty: return None
+
+        # 抓中文名稱
+        try:
+            dl_info = DataLoader()
+            dl_info.login_by_token(api_token=FINMIND_TOKEN)
+            stock_info = dl_info.taiwan_stock_info()
+            match = stock_info[stock_info['stock_id'] == sid]
+            stock_name = match.iloc[0]['stock_name'] if not match.empty else ""
+        except:
+            stock_name = ""
         
         df.columns = df.columns.get_level_values(0) if isinstance(df.columns, pd.MultiIndex) else df.columns
         
@@ -129,7 +139,8 @@ def get_stock_analysis(sid):
             "trend_ok": trend_ok, "momentum_ok": momentum_ok,
             "volume_ok": volume_ok,
             "foreign_ok": foreign_ok, "trust_ok": trust_ok, "dealer_ok": dealer_ok,
-            "bias": ((p_close - ma20) / ma20) * 100
+            "bias": ((p_close - ma20) / ma20) * 100,
+            "stock_name": stock_name
         }
     except Exception as e:
         return None
@@ -167,7 +178,7 @@ data = get_stock_analysis(st.session_state.stock_id)
 if data:
     market_suffix = "上市" if yf.download(f"{st.session_state.stock_id}.TWO", period="1d", progress=False).empty else "上櫃"
     
-    st.header(f"📈 {st.session_state.stock_id} 深度診斷 ({market_suffix}) | 最新價格：{data['p_close']:.2f}")
+    st.header(f"📈 {st.session_state.stock_id} {data['stock_name']} 深度診斷 ({market_suffix}) | 最新價格：{data['p_close']:.2f}")
 
     # 第一區：趨勢與風險
     st.subheader("📍 趨勢指標與風險")

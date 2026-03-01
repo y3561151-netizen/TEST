@@ -58,8 +58,9 @@ def get_stock_analysis(sid):
         
         consecutive_buy = False
         total_inst_3d   = 0
-        trust_3d        = 0   # 新增：投信近3日
-        foreign_3d      = 0   # 新增：外資近3日
+        trust_3d        = 0   # 投信近3日
+        foreign_3d      = 0   # 外資近3日
+        dealer_3d       = 0   # 自營商近3日
 
         if not inst.empty:
             # 原本的法人合計
@@ -83,6 +84,12 @@ def get_stock_analysis(sid):
             )
             foreign_3d = foreign_daily.tail(3).sum() / 1000
 
+            # 新增：自營商單獨計算
+            dealer_daily = inst[inst['name'] == 'Dealer_self'].groupby('date').apply(
+                lambda x: x['buy'].sum() - x['sell'].sum()
+            )
+            dealer_3d = dealer_daily.tail(3).sum() / 1000 if not dealer_daily.empty else 0
+
         # === 新版評分邏輯 ===
 
         # 1. 技術趨勢：站上月線 且 月線向上
@@ -96,13 +103,18 @@ def get_stock_analysis(sid):
         vol_strong = vol_today > v_ma20 * 1.5
         volume_ok  = vol_strong and price_up
 
-        # 4. 籌碼力道：投信買超優先
-        inst_strong = (trust_3d > 0) and (foreign_3d > 0)  # 外資+投信同買
-        inst_ok     = trust_3d > 0                          # 至少投信買超
+        # 4. 外資近3日買賣超
+        foreign_ok = foreign_3d > 0
+
+        # 5. 投信近3日買賣超
+        trust_ok = trust_3d > 0
+
+        # 6. 自營商近3日買賣超
+        dealer_ok = dealer_3d > 0
 
         # 技術面必須同時過才有資格（門檻條件）
         tech_pass = trend_ok and momentum_ok
-        score = sum([trend_ok, momentum_ok, volume_ok, inst_ok])
+        score = sum([trend_ok, momentum_ok, volume_ok, foreign_ok, trust_ok, dealer_ok])
 
         return {
             "df": df, "latest": latest,
@@ -113,9 +125,10 @@ def get_stock_analysis(sid):
             "vol_today": vol_today, "v_ma5": v_ma5, "v_ma20": v_ma20,
             "price_up": price_up, "vol_strong": vol_strong,
             "consecutive": consecutive_buy, "total_inst_3d": total_inst_3d,
-            "trust_3d": trust_3d, "foreign_3d": foreign_3d,
+            "trust_3d": trust_3d, "foreign_3d": foreign_3d, "dealer_3d": dealer_3d,
             "trend_ok": trend_ok, "momentum_ok": momentum_ok,
-            "volume_ok": volume_ok, "inst_ok": inst_ok, "inst_strong": inst_strong,
+            "volume_ok": volume_ok,
+            "foreign_ok": foreign_ok, "trust_ok": trust_ok, "dealer_ok": dealer_ok,
             "bias": ((p_close - ma20) / ma20) * 100
         }
     except Exception as e:
@@ -134,7 +147,7 @@ with st.sidebar:
         with st.status("同步掃描中...", expanded=False):
             for s_id in scan_list:
                 res = get_stock_analysis(s_id)
-                if res and res['tech_pass'] and res['score'] >= 3:  # 技術面必須過
+                if res and res['tech_pass'] and res['score'] >= 5:  # 技術面必須過，6選5
                     label = f"🚀 {s_id} ({res['score']}分)"
                     if res['consecutive']: label += " 🔥連買"
                     if st.button(label, key=f"btn_scan_{s_id}"):
@@ -143,8 +156,8 @@ with st.sidebar:
 
     st.write("📋 **統一篩選邏輯說明**")
     logic_df = pd.DataFrame({
-        "項目": ["1.技術趨勢", "2.技術動能", "3.量能表現", "4.籌碼力道"],
-        "標準": ["價格>20MA 且 月線向上", "5MA>10MA>20MA 且斜率向上", "量>20均量1.5倍 且收紅", "投信近3日買超"]
+        "項目": ["1.技術趨勢", "2.技術動能", "3.量能表現", "4.外資", "5.投信", "6.自營商"],
+        "標準": ["價格>20MA 且月線向上", "5MA>10MA>20MA 且斜率向上", "量>20均量1.5倍 且收紅", "近3日買超", "近3日買超", "近3日買超"]
     })
     st.write(logic_df.to_html(index=False, justify='center'), unsafe_allow_html=True)
 
@@ -198,29 +211,39 @@ if data:
     else:
         volume_text, volume_status = "❌ 量能不足", "常態"
 
-    # 籌碼力道文字
-    if data['inst_strong']:
-        chip_text, chip_status = "🔥 外資+投信聯合買超", "強力推升"
-    elif data['inst_ok']:
-        chip_text, chip_status = "✅ 投信持續買超", "推升"
-    elif data['foreign_3d'] > 0:
-        chip_text, chip_status = "⚠️ 僅外資買超", "觀望"
+    # 外資文字
+    if data['foreign_ok']:
+        foreign_text, foreign_status = f"✅ 買超 {data['foreign_3d']:.0f} 張", "買超"
     else:
-        chip_text, chip_status = "❌ 法人賣出", "壓力"
+        foreign_text, foreign_status = f"❌ 賣超 {abs(data['foreign_3d']):.0f} 張", "賣超"
 
-    # 綜合評價（技術面必須同時過）
-    if data['tech_pass'] and data['score'] >= 3:
-        st.success(f"🔥 綜合評價：強力關注 (得分: {data['score']}/4)")
-    elif data['tech_pass'] and data['score'] == 2:
-        st.warning(f"👀 綜合評價：技術面穩固，持續觀察 (得分: {data['score']}/4)")
+    # 投信文字
+    if data['trust_ok']:
+        trust_text, trust_status = f"✅ 買超 {data['trust_3d']:.0f} 張", "買超"
     else:
-        st.info(f"⚖️ 綜合評價：中性觀望 (得分: {data['score']}/4)")
+        trust_text, trust_status = f"❌ 賣超 {abs(data['trust_3d']):.0f} 張", "賣超"
+
+    # 自營商文字
+    if data['dealer_ok']:
+        dealer_text, dealer_status = f"✅ 買超 {data['dealer_3d']:.0f} 張", "買超"
+    else:
+        dealer_text, dealer_status = f"❌ 賣超 {abs(data['dealer_3d']):.0f} 張", "賣超"
+
+    # 綜合評價（技術面必須同時過，6選5以上強力關注）
+    if data['tech_pass'] and data['score'] >= 5:
+        st.success(f"🔥 綜合評價：強力關注 (得分: {data['score']}/6)")
+    elif data['tech_pass'] and data['score'] == 4:
+        st.warning(f"👀 綜合評價：技術面穩固，持續觀察 (得分: {data['score']}/6)")
+    else:
+        st.info(f"⚖️ 綜合評價：中性觀望 (得分: {data['score']}/6)")
 
     diag_rows = [
-        ["1", "技術趨勢", trend_text, trend_status],
-        ["2", "技術動能", momentum_text, momentum_status],
-        ["3", "成交量能", volume_text, volume_status],
-        ["4", "籌碼力道", chip_text, chip_status],
+        ["1", "技術趨勢",  trend_text,    trend_status],
+        ["2", "技術動能",  momentum_text, momentum_status],
+        ["3", "成交量能",  volume_text,   volume_status],
+        ["4", "外資(3日)", foreign_text,  foreign_status],
+        ["5", "投信(3日)", trust_text,    trust_status],
+        ["6", "自營商(3日)", dealer_text, dealer_status],
     ]
     diag_df = pd.DataFrame(diag_rows, columns=["#", "項目", "診斷結果與標準定義", "狀態"])
     st.write(diag_df.to_html(index=False, justify='left'), unsafe_allow_html=True)

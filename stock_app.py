@@ -12,9 +12,9 @@ st.set_page_config(page_title="台股智慧分析師 Pro Max", layout="wide")
 if 'stock_id' not in st.session_state:
     st.session_state.stock_id = "2330"
 if 'scan_results' not in st.session_state:
-    st.session_state.scan_results = None   # 掃描結果存這裡
+    st.session_state.scan_results = None
 if 'show_scan' not in st.session_state:
-    st.session_state.show_scan = False     # 控制右側顯示掃描結果還是個股診斷
+    st.session_state.show_scan = False
 
 # =====================================================================
 # 函式 1：只跑技術面（用 yfinance，不消耗 FinMind 額度）
@@ -166,7 +166,7 @@ def get_stock_analysis(sid, stock_info_df=None):
         return None
 
 # =====================================================================
-# 函式 3：全市場掃描（當日成交量前50）
+# 函式 3：全市場掃描（當日成交量前50）—— 含除錯輸出
 # =====================================================================
 def run_market_scan():
     results = []
@@ -181,25 +181,30 @@ def run_market_scan():
         vol_data = dl.taiwan_stock_daily_overview(
             start_date=(datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
         )
+
+        # 除錯①：確認 vol_data 是否有資料、欄位名稱是否正確
         if vol_data.empty:
-            st.warning("無法取得成交量資料，可能是 FinMind 免費方案限制")
+            st.warning("⚠️ vol_data 是空的，FinMind 免費方案可能不支援此 API")
             return []
 
-        # 除錯：顯示欄位名稱和資料樣本
-        st.write("📋 vol_data 欄位：", vol_data.columns.tolist())
-        st.write("📋 vol_data 前5筆：", vol_data.head())
+        st.write("📋 **除錯①** vol_data 欄位：", vol_data.columns.tolist())
+        st.write("📋 **除錯①** vol_data 前5筆：", vol_data.head())
 
         latest_date = vol_data['date'].max()
-        st.info(f"📅 最新資料日期：{latest_date}")
+        st.info(f"📅 **除錯②** 最新資料日期：{latest_date}")
+
+        # 確認欄位名稱（有些版本可能是 Trading_Volume 而不是 volume）
+        vol_col = 'volume' if 'volume' in vol_data.columns else vol_data.columns[2]
+        st.info(f"📊 **除錯③** 使用成交量欄位：{vol_col}")
 
         top50 = (
             vol_data[vol_data['date'] == latest_date]
-            .sort_values('volume', ascending=False)
+            .sort_values(vol_col, ascending=False)
             .head(50)['stock_id']
             .astype(str)
             .tolist()
         )
-        st.info(f"🔢 前10名代號：{top50[:10]}")
+        st.info(f"🔢 **除錯④** 前10名代號：{top50[:10]}")
 
     except Exception as e:
         st.warning(f"取得排行榜失敗：{e}")
@@ -213,31 +218,9 @@ def run_market_scan():
         if tech and tech['tech_pass']:
             tech_pass_list.append(sid)
 
-    st.info(f"✅ 技術面過關：{len(tech_pass_list)} 支 → {tech_pass_list}")
+    st.info(f"✅ **除錯⑤** 技術面過關：{len(tech_pass_list)} 支 → {tech_pass_list}")
 
-    # 第二階段：技術面過關的才呼叫 FinMind 抓籌碼
-    for i, sid in enumerate(tech_pass_list):
-        progress.progress(
-            (i + 1) / max(len(tech_pass_list), 1),
-            text=f"籌碼面分析中... {sid} ({i+1}/{len(tech_pass_list)})"
-        )
-        full = get_stock_analysis(sid, stock_info_df=stock_info_df)
-        if full and full['score'] >= 4:
-            results.append({"stock_id": sid, **full})
-
-    progress.empty()
-    results.sort(key=lambda x: x['score'], reverse=True)
-    return results
-
-    # 第一階段：yfinance 技術面快篩（不消耗 FinMind）
-    tech_pass_list = []
-    for i, sid in enumerate(top50):
-        progress.progress((i + 1) / len(top50), text=f"技術面掃描中... {sid} ({i+1}/{len(top50)})")
-        tech = get_tech_only(sid)
-        if tech and tech['tech_pass']:
-            tech_pass_list.append(sid)
-
-    # 第二階段：技術面過關的才呼叫 FinMind 抓籌碼
+    # 第二階段：技術面過關才呼叫 FinMind 籌碼
     for i, sid in enumerate(tech_pass_list):
         progress.progress(
             (i + 1) / max(len(tech_pass_list), 1),
@@ -323,7 +306,6 @@ else:
         market_suffix = "上市" if yf.download(f"{st.session_state.stock_id}.TWO", period="1d", progress=False).empty else "上櫃"
         st.header(f"📈 {st.session_state.stock_id} {data['stock_name']} 深度診斷 ({market_suffix}) | 最新價格：{data['p_close']:.2f}")
 
-        # 第一區：趨勢與風險
         st.subheader("📍 趨勢指標與風險")
         t1, t2, t3, t4 = st.columns(4)
         t1.metric("短線趨勢 (5MA>10MA)", "🔴 多方" if data['ma5'] > data['ma10'] else "🟢 空方")
@@ -331,14 +313,12 @@ else:
         t3.metric("月線乖離率", f"{data['bias']:.1f}%")
         t4.metric("乖離狀態", "過熱" if data['bias'] > 10 else "安全", delta_color="inverse")
 
-        # 第二區：量能
         st.subheader("📊 量能監控")
         b1, b2 = st.columns(2)
         b1.metric("今日成交張數", f"{data['vol_today']:.0f} 張")
         b2.metric("量能狀態", "爆量攻擊" if data['vol_strong'] else "正常",
                   delta=f"{data['vol_today']/data['v_ma20']:.1f}x 20日均量")
 
-        # 第三區：AI 診斷報告
         st.divider()
         st.subheader("🤖 AI 投資客綜合診斷")
 
@@ -385,7 +365,6 @@ else:
         diag_df = pd.DataFrame(diag_rows, columns=["#", "項目", "診斷結果與標準定義", "狀態"])
         st.write(diag_df.to_html(index=False, justify='left'), unsafe_allow_html=True)
 
-        # 新聞
         st.divider()
         st.subheader("📰 即時相關新聞")
         try:
@@ -405,4 +384,3 @@ else:
             st.warning("新聞模組讀取失敗。")
     else:
         st.error(f"查無 {st.session_state.stock_id} 數據，請確認代號是否正確。")
-

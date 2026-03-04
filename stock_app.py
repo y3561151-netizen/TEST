@@ -21,6 +21,11 @@ if 'show_scan' not in st.session_state:
 # =====================================================================
 def get_tech_only(sid):
     try:
+        # ETF代號補齊零（如 9816 → 009816，00919 保持不變）
+        if len(sid) == 4 and sid.startswith('0'):
+            sid = sid.zfill(6)
+        elif len(sid) == 5 and sid.startswith('0'):
+            sid = sid.zfill(6)
         df = yf.download(f"{sid}.TW", period="6mo", progress=False, auto_adjust=True)
         if df.empty:
             df = yf.download(f"{sid}.TWO", period="6mo", progress=False, auto_adjust=True)
@@ -73,6 +78,9 @@ def get_tech_only(sid):
 # =====================================================================
 def get_stock_analysis(sid, stock_info_df=None):
     try:
+        # ETF代號補齊零
+        if len(sid) <= 5 and sid.startswith('0'):
+            sid = sid.zfill(6)
         tech = get_tech_only(sid)
         if tech is None:
             return None

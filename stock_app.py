@@ -176,18 +176,22 @@ def run_market_scan():
         dl = DataLoader()
         dl.login_by_token(api_token=FINMIND_TOKEN)
 
-        # 一次抓好股票清單，後面重複使用
         stock_info_df = dl.taiwan_stock_info()
 
-        # 抓近幾天的每日總覽，取最新日期的前50大成交量
         vol_data = dl.taiwan_stock_daily_overview(
             start_date=(datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
         )
         if vol_data.empty:
-            st.warning("無法取得成交量資料")
+            st.warning("無法取得成交量資料，可能是 FinMind 免費方案限制")
             return []
 
+        # 除錯：顯示欄位名稱和資料樣本
+        st.write("📋 vol_data 欄位：", vol_data.columns.tolist())
+        st.write("📋 vol_data 前5筆：", vol_data.head())
+
         latest_date = vol_data['date'].max()
+        st.info(f"📅 最新資料日期：{latest_date}")
+
         top50 = (
             vol_data[vol_data['date'] == latest_date]
             .sort_values('volume', ascending=False)
@@ -195,9 +199,35 @@ def run_market_scan():
             .astype(str)
             .tolist()
         )
+        st.info(f"🔢 前10名代號：{top50[:10]}")
+
     except Exception as e:
         st.warning(f"取得排行榜失敗：{e}")
         return []
+
+    # 第一階段：yfinance 技術面快篩
+    tech_pass_list = []
+    for i, sid in enumerate(top50):
+        progress.progress((i + 1) / len(top50), text=f"技術面掃描中... {sid} ({i+1}/{len(top50)})")
+        tech = get_tech_only(sid)
+        if tech and tech['tech_pass']:
+            tech_pass_list.append(sid)
+
+    st.info(f"✅ 技術面過關：{len(tech_pass_list)} 支 → {tech_pass_list}")
+
+    # 第二階段：技術面過關的才呼叫 FinMind 抓籌碼
+    for i, sid in enumerate(tech_pass_list):
+        progress.progress(
+            (i + 1) / max(len(tech_pass_list), 1),
+            text=f"籌碼面分析中... {sid} ({i+1}/{len(tech_pass_list)})"
+        )
+        full = get_stock_analysis(sid, stock_info_df=stock_info_df)
+        if full and full['score'] >= 4:
+            results.append({"stock_id": sid, **full})
+
+    progress.empty()
+    results.sort(key=lambda x: x['score'], reverse=True)
+    return results
 
     # 第一階段：yfinance 技術面快篩（不消耗 FinMind）
     tech_pass_list = []
@@ -375,3 +405,4 @@ else:
             st.warning("新聞模組讀取失敗。")
     else:
         st.error(f"查無 {st.session_state.stock_id} 數據，請確認代號是否正確。")
+

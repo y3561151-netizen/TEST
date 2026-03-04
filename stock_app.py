@@ -168,8 +168,8 @@ def get_stock_analysis(sid, stock_info_df=None):
 # =====================================================================
 # 函式 3：全市場掃描（當日成交量前50）—— 含除錯輸出
 # =====================================================================
-def get_top50_dynamic():
-    """從證交所抓當日成交量前50，失敗則回傳固定清單"""
+def get_top50_yesterday():
+    """從證交所抓昨日成交量前50，失敗則回傳固定清單"""
     import requests
 
     FALLBACK = [
@@ -182,10 +182,9 @@ def get_top50_dynamic():
 
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
-    # 試上市（證交所）
-    for days_back in range(0, 6):
+    # 從昨天往前找，最多找7天（跳過週末假日）
+    for days_back in range(1, 8):
         try:
-            from datetime import datetime, timedelta
             date_str = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
             url = f"https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX20?date={date_str}&type=VOL&response=json"
             res = requests.get(url, timeout=15, headers=headers)
@@ -193,31 +192,16 @@ def get_top50_dynamic():
             if data.get("stat") == "OK" and data.get("data"):
                 ids = [r[1].strip() for r in data["data"][:50] if r[1].strip().isdigit()]
                 if ids:
-                    return ids, f"證交所上市 {date_str}"
+                    return ids, date_str
         except:
             continue
 
-    # 試上櫃（櫃買中心）
-    for days_back in range(0, 6):
-        try:
-            from datetime import datetime, timedelta
-            date_str = (datetime.now() - timedelta(days=days_back)).strftime("%Y/%m/%d")
-            url = f"https://www.tpex.org.tw/web/stock/aftertrading/otc_stk_vol_rank/stk_vol_rank_result.php?l=zh-tw&se=AL&d={date_str}&s=0,asc"
-            res = requests.get(url, timeout=15, headers=headers)
-            data = res.json()
-            if data.get("iTotalRecords", 0) > 0:
-                ids = [r[1].strip() for r in data.get("aaData", [])[:50] if r[1].strip().isdigit()]
-                if ids:
-                    return ids, f"櫃買上櫃 {date_str}"
-        except:
-            continue
-
-    return FALLBACK, "固定候選清單（動態來源暫時無法使用）"
+    return FALLBACK, "固定備案清單"
 
 
 def run_market_scan():
     results = []
-    progress = st.progress(0, text="正在抓取成交量排行...")
+    progress = st.progress(0, text="正在抓取昨日成交量排行...")
 
     # 用 FinMind 抓股票中文名稱清單（只呼叫一次）
     stock_info_df = None
@@ -228,8 +212,8 @@ def run_market_scan():
     except:
         pass
 
-    top50, source = get_top50_dynamic()
-    st.info(f"📊 資料來源：{source}　｜　掃描 {len(top50)} 支股票　｜　前5名：{top50[:5]}")
+    top50, source_date = get_top50_yesterday()
+    st.info(f"📊 依據 {source_date} 成交量排行　｜　掃描 {len(top50)} 支　｜　前5名：{top50[:5]}")
 
     # 第一階段：yfinance 技術面快篩
     tech_pass_list = []
@@ -267,7 +251,7 @@ with st.sidebar:
 
     st.divider()
     st.title("🎯 選股神器 2.0")
-    st.caption("自動掃描當日成交量前 50 名，篩出 4/6 以上強勢股")
+    st.caption("依昨日成交量前 50 名，篩出今日 4/6 以上強勢股")
 
     if st.button("🚀 開始 AI 掃描"):
         st.session_state.show_scan = True
@@ -292,7 +276,7 @@ if st.session_state.show_scan and st.session_state.scan_results is not None:
     results = st.session_state.scan_results
 
     st.header("🔍 AI 全市場掃描結果")
-    st.caption(f"當日成交量前 50 名中，符合 4/6 以上條件的股票（共 {len(results)} 檔）")
+    st.caption(f"昨日成交量前 50 名中，符合今日 4/6 以上條件的股票（共 {len(results)} 檔）")
 
     if not results:
         st.info("本次掃描無符合條件的股票，市場可能偏弱或資料尚未更新。")

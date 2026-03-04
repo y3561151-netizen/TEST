@@ -168,34 +168,28 @@ def get_stock_analysis(sid, stock_info_df=None):
 # =====================================================================
 # 函式 3：全市場掃描（當日成交量前50）—— 含除錯輸出
 # =====================================================================
-def get_top50_yesterday(dl):
-    """用 FinMind 抓昨日成交量前50"""
-
-    FALLBACK = [
-        "2330","2317","2454","2382","2308","2303","2881","2882","2886","2891",
-        "2892","2884","2885","2887","2883","2880","2890","5880","2609","2615",
-        "2603","2610","2618","1301","1303","1326","1216","1101","1102","2002",
-        "2006","2207","2201","2105","2049","2379","2357","2376","2377","2395",
-        "2408","2409","2412","2474","2492","2498","3008","3045","3481","3711",
-    ]
-
-    # 從昨天往前找最近交易日，最多找7天
-    for days_back in range(1, 8):
-        try:
-            date_str = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
-            rank_data = dl.taiwan_stock_trading_volume_rank(date=date_str)
-            if rank_data is not None and not rank_data.empty:
-                ids = rank_data.sort_values('volume', ascending=False).head(50)['stock_id'].astype(str).tolist()
-                ids = [s for s in ids if s.isdigit() and len(s) == 4]
-                if ids:
-                    st.info(f"✅ 成功取得 {date_str} 成交量排行")
-                    return ids, date_str
-        except Exception as e:
-            st.write(f"🔍 {date_str} 嘗試失敗：{e}")
-            continue
-
-    st.warning("⚠️ FinMind 無法取得排行，改用固定備案清單")
-    return FALLBACK, "固定備案清單"
+# 台股常態高成交量股票清單（涵蓋上市上櫃主要熱門股約100支）
+SCAN_LIST = [
+    # 電子大型股
+    "2330","2317","2454","2382","2308","2303","2357","2379","2395",
+    "2376","2377","2408","2409","2412","2474","2492","2498","3008",
+    "3045","3481","3711","3034","3037","2344","2356","2360","2404",
+    "2441","3231","3293","6415","6669","8069","8046","2049","2367",
+    "2327","2353","2376","2379","3673","6176","6244","6446","6770",
+    # 金融股
+    "2881","2882","2886","2891","2892","2884","2885","2887","2883",
+    "2880","2890","5880","2823","2838","5876","2834","2836",
+    # 傳產/航運
+    "2002","2006","1301","1303","1326","1216","1101","1102","2207",
+    "2201","2105","2603","2609","2610","2615","2618","2637","2641",
+    # 中小型熱門股
+    "3293","4904","4938","6505","9910","9921","2006","1513","2059",
+    "3714","6153","6278","6285","6449","6533","3037","6271","5274",
+]
+# 過濾確保都是4位數字代號
+SCAN_LIST = [s for s in SCAN_LIST if s.isdigit() and len(s) == 4]
+# 去除重複
+SCAN_LIST = list(dict.fromkeys(SCAN_LIST))
 
 
 def run_market_scan():
@@ -204,7 +198,6 @@ def run_market_scan():
 
     # 初始化 FinMind（只登入一次，後面重複使用）
     stock_info_df = None
-    dl = None
     try:
         dl = DataLoader()
         dl.login_by_token(api_token=FINMIND_TOKEN)
@@ -214,14 +207,8 @@ def run_market_scan():
         progress.empty()
         return []
 
-    top50, source_date = get_top50_yesterday(dl)
-
-    if not top50:
-        st.error("❌ 無法取得昨日成交量排行")
-        progress.empty()
-        return []
-
-    st.info(f"📊 依據 {source_date} 成交量排行　｜　掃描 {len(top50)} 支　｜　前5名：{top50[:5]}")
+    top50 = SCAN_LIST
+    st.info(f"📊 掃描 {len(top50)} 支主要熱門股")
 
     # 第一階段：yfinance 技術面快篩
     tech_pass_list = []
@@ -259,7 +246,7 @@ with st.sidebar:
 
     st.divider()
     st.title("🎯 選股神器 2.0")
-    st.caption("依昨日成交量前 50 名，篩出今日 4/6 以上強勢股")
+    st.caption("掃描台股主要熱門股，篩出 4/6 以上強勢股")
 
     if st.button("🚀 開始 AI 掃描"):
         st.session_state.show_scan = True
@@ -284,7 +271,7 @@ if st.session_state.show_scan and st.session_state.scan_results is not None:
     results = st.session_state.scan_results
 
     st.header("🔍 AI 全市場掃描結果")
-    st.caption(f"昨日成交量前 50 名中，符合今日 4/6 以上條件的股票（共 {len(results)} 檔）")
+    st.caption(f"台股主要熱門股中，符合 4/6 以上條件的股票（共 {len(results)} 檔）")
 
     if not results:
         st.info("本次掃描無符合條件的股票，市場可能偏弱或資料尚未更新。")

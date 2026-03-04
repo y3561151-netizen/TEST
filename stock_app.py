@@ -266,7 +266,7 @@ if st.session_state.show_scan and st.session_state.scan_results is not None:
     if not results:
         st.info("本次掃描無符合條件的股票，市場可能偏弱或資料尚未更新。")
     else:
-        for r in results:
+        for idx, r in enumerate(results):
             score = r['score']
             sid   = r['stock_id']
             name  = r['stock_name']
@@ -283,7 +283,7 @@ if st.session_state.show_scan and st.session_state.scan_results is not None:
                 c5.metric("投信(3日)", f"{'✅' if r['trust_ok'] else '❌'} {r['trust_3d']:.0f} 張")
                 c6.metric("自營商(3日)", f"{'✅' if r['dealer_ok'] else '❌'} {r['dealer_3d']:.0f} 張")
 
-                if st.button(f"查看 {sid} {name} 完整診斷", key=f"goto_{sid}"):
+                if st.button(f"查看 {sid} {name} 完整診斷", key=f"goto_{idx}_{sid}"):
                     st.session_state.stock_id = sid
                     st.session_state.show_scan = False
                     st.rerun()

@@ -168,29 +168,26 @@ def get_stock_analysis(sid, stock_info_df=None):
 # =====================================================================
 # 函式 3：全市場掃描（當日成交量前50）—— 含除錯輸出
 # =====================================================================
-def get_top50_from_twse():
-    """從證交所公開資料抓當日成交量前50，完全不消耗 FinMind 額度"""
-    import requests
-    for days_back in range(0, 6):
-        date = datetime.now() - timedelta(days=days_back)
-        date_str = date.strftime('%Y%m%d')
-        try:
-            url = f"https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX20?date={date_str}&type=VOL&response=json"
-            res = requests.get(url, timeout=10)
-            data = res.json()
-            if data.get('stat') == 'OK' and 'data' in data:
-                rows = data['data']
-                top50 = [r[1].strip() for r in rows[:50]]
-                if top50:
-                    return top50
-        except:
-            continue
-    return []
+# 台灣50 + 中型100 常見成分股固定清單（共約80支，涵蓋主要熱門股）
+SCAN_CANDIDATES = [
+    "2330","2317","2454","2382","2308","2303","2881","2882","2886","2891",
+    "2892","2884","2885","2887","2883","2880","2890","5880","2609","2615",
+    "2603","2610","2618","2carrier","1301","1303","1326","1216","1101","1102",
+    "2002","2006","2207","2201","2105","2049","2379","2357","2376","2377",
+    "2395","2408","2409","2412","2474","2492","2498","2603","2618","3008",
+    "3045","3481","3673","3711","4904","4938","5871","6415","6505","6669",
+    "8046","8069","9910","9921","2367","2344","2356","2360","2404","2441",
+    "3034","3037","3231","3293","6176","6244","6446","6770","2327","2353",
+]
+# 移除可能有錯誤的代號
+SCAN_CANDIDATES = [s for s in SCAN_CANDIDATES if s.isdigit() and len(s) == 4]
 
 
 def run_market_scan():
     results = []
-    progress = st.progress(0, text="正在抓取當日成交量排行...")
+    top50 = SCAN_CANDIDATES[:50]
+
+    progress = st.progress(0, text="正在掃描候選股票...")
 
     # 用 FinMind 抓股票中文名稱清單（只呼叫一次）
     stock_info_df = None
@@ -201,14 +198,7 @@ def run_market_scan():
     except:
         pass
 
-    # 從證交所公開資料抓前50（不消耗 FinMind）
-    top50 = get_top50_from_twse()
-    if not top50:
-        st.warning("⚠️ 無法取得成交量排行，可能今日尚未收盤或為假日，請稍後再試。")
-        progress.empty()
-        return []
-
-    st.info(f"🔢 成交量前50名前10支：{top50[:10]}")
+    st.info(f"🔢 本次掃描 {len(top50)} 支候選股票")
 
     # 第一階段：yfinance 技術面快篩
     tech_pass_list = []

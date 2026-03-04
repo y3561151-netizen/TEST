@@ -168,9 +168,8 @@ def get_stock_analysis(sid, stock_info_df=None):
 # =====================================================================
 # 函式 3：全市場掃描（當日成交量前50）—— 含除錯輸出
 # =====================================================================
-def get_top50_yesterday():
-    """從證交所抓昨日成交量前50，失敗則回傳固定清單"""
-    import requests
+def get_top50_yesterday(dl):
+    """用 FinMind 抓昨日成交量前50"""
 
     FALLBACK = [
         "2330","2317","2454","2382","2308","2303","2881","2882","2886","2891",
@@ -180,44 +179,45 @@ def get_top50_yesterday():
         "2408","2409","2412","2474","2492","2498","3008","3045","3481","3711",
     ]
 
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-
-    # 從昨天往前找，最多找7天（跳過週末假日）
+    # 從昨天往前找最近交易日，最多找7天
     for days_back in range(1, 8):
-        date_str = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
         try:
-            url = f"https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX20?date={date_str}&type=VOL&response=json"
-            res = requests.get(url, timeout=15, headers=headers)
-            data = res.json()
-            st.write(f"🔍 嘗試 {date_str}：stat={data.get('stat')}，有data={bool(data.get('data'))}")
-            if data.get("stat") == "OK" and data.get("data"):
-                ids = [r[1].strip() for r in data["data"][:50] if r[1].strip().isdigit()]
+            date_str = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+            rank_data = dl.taiwan_stock_trading_volume_rank(date=date_str)
+            if rank_data is not None and not rank_data.empty:
+                ids = rank_data.sort_values('volume', ascending=False).head(50)['stock_id'].astype(str).tolist()
+                ids = [s for s in ids if s.isdigit() and len(s) == 4]
                 if ids:
+                    st.info(f"✅ 成功取得 {date_str} 成交量排行")
                     return ids, date_str
         except Exception as e:
-            st.write(f"❌ {date_str} 失敗：{e}")
+            st.write(f"🔍 {date_str} 嘗試失敗：{e}")
             continue
 
-    return [], "無法取得資料"
+    st.warning("⚠️ FinMind 無法取得排行，改用固定備案清單")
+    return FALLBACK, "固定備案清單"
 
 
 def run_market_scan():
     results = []
     progress = st.progress(0, text="正在抓取昨日成交量排行...")
 
-    # 用 FinMind 抓股票中文名稱清單（只呼叫一次）
+    # 初始化 FinMind（只登入一次，後面重複使用）
     stock_info_df = None
+    dl = None
     try:
         dl = DataLoader()
         dl.login_by_token(api_token=FINMIND_TOKEN)
         stock_info_df = dl.taiwan_stock_info()
-    except:
-        pass
+    except Exception as e:
+        st.warning(f"FinMind 登入失敗：{e}")
+        progress.empty()
+        return []
 
-    top50, source_date = get_top50_yesterday()
+    top50, source_date = get_top50_yesterday(dl)
 
     if not top50:
-        st.error("❌ 無法取得昨日成交量排行，請查看上方除錯訊息")
+        st.error("❌ 無法取得昨日成交量排行")
         progress.empty()
         return []
 

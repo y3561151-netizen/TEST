@@ -168,47 +168,47 @@ def get_stock_analysis(sid, stock_info_df=None):
 # =====================================================================
 # 函式 3：全市場掃描（當日成交量前50）—— 含除錯輸出
 # =====================================================================
+def get_top50_from_twse():
+    """從證交所公開資料抓當日成交量前50，完全不消耗 FinMind 額度"""
+    import requests
+    for days_back in range(0, 6):
+        date = datetime.now() - timedelta(days=days_back)
+        date_str = date.strftime('%Y%m%d')
+        try:
+            url = f"https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX20?date={date_str}&type=VOL&response=json"
+            res = requests.get(url, timeout=10)
+            data = res.json()
+            if data.get('stat') == 'OK' and 'data' in data:
+                rows = data['data']
+                top50 = [r[1].strip() for r in rows[:50]]
+                if top50:
+                    return top50
+        except:
+            continue
+    return []
+
+
 def run_market_scan():
     results = []
     progress = st.progress(0, text="正在抓取當日成交量排行...")
 
+    # 用 FinMind 抓股票中文名稱清單（只呼叫一次）
+    stock_info_df = None
     try:
         dl = DataLoader()
         dl.login_by_token(api_token=FINMIND_TOKEN)
-
         stock_info_df = dl.taiwan_stock_info()
+    except:
+        pass
 
-        vol_data = dl.taiwan_stock_daily_overview(
-            start_date=(datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
-        )
-
-        # 除錯①：確認 vol_data 是否有資料、欄位名稱是否正確
-        if vol_data.empty:
-            st.warning("⚠️ vol_data 是空的，FinMind 免費方案可能不支援此 API")
-            return []
-
-        st.write("📋 **除錯①** vol_data 欄位：", vol_data.columns.tolist())
-        st.write("📋 **除錯①** vol_data 前5筆：", vol_data.head())
-
-        latest_date = vol_data['date'].max()
-        st.info(f"📅 **除錯②** 最新資料日期：{latest_date}")
-
-        # 確認欄位名稱（有些版本可能是 Trading_Volume 而不是 volume）
-        vol_col = 'volume' if 'volume' in vol_data.columns else vol_data.columns[2]
-        st.info(f"📊 **除錯③** 使用成交量欄位：{vol_col}")
-
-        top50 = (
-            vol_data[vol_data['date'] == latest_date]
-            .sort_values(vol_col, ascending=False)
-            .head(50)['stock_id']
-            .astype(str)
-            .tolist()
-        )
-        st.info(f"🔢 **除錯④** 前10名代號：{top50[:10]}")
-
-    except Exception as e:
-        st.warning(f"取得排行榜失敗：{e}")
+    # 從證交所公開資料抓前50（不消耗 FinMind）
+    top50 = get_top50_from_twse()
+    if not top50:
+        st.warning("⚠️ 無法取得成交量排行，可能今日尚未收盤或為假日，請稍後再試。")
+        progress.empty()
         return []
+
+    st.info(f"🔢 成交量前50名前10支：{top50[:10]}")
 
     # 第一階段：yfinance 技術面快篩
     tech_pass_list = []
